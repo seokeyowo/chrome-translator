@@ -171,27 +171,48 @@
     "SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "INPUT", "CODE", "PRE", "IFRAME",
   ]);
   const REPLACED = []; // { node, original }
+  const TRANSLATED_NODES = new WeakSet();
+  let observer = null;
+  let pendingNodes = new Set();
+  let flushTimer = null;
 
-  function collectChineseTextNodes() {
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
-      acceptNode(node) {
-        if (!node.nodeValue || !node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
-        if (!/[㐀-鿿]/.test(node.nodeValue)) return NodeFilter.FILTER_REJECT;
-        const p = node.parentElement;
-        if (!p || SKIP_TAGS.has(p.tagName)) return NodeFilter.FILTER_REJECT;
-        if (p.closest(".ctk-popup, .ctk-composer")) return NodeFilter.FILTER_REJECT;
-        return NodeFilter.FILTER_ACCEPT;
+  function isTranslatableTextNode(node) {
+    if (!node || node.nodeType !== Node.TEXT_NODE) return false;
+    if (TRANSLATED_NODES.has(node)) return false;
+    if (!node.nodeValue || !node.nodeValue.trim()) return false;
+    if (!/[㐀-鿿]/.test(node.nodeValue)) return false;
+    const p = node.parentElement;
+    if (!p || SKIP_TAGS.has(p.tagName)) return false;
+    if (p.closest(".ctk-popup, .ctk-composer")) return false;
+    return true;
+  }
+
+  function collectChineseTextNodesFrom(root) {
+    const nodes = [];
+    if (!root) return nodes;
+    if (root.nodeType === Node.TEXT_NODE) {
+      if (isTranslatableTextNode(root)) nodes.push(root);
+      return nodes;
+    }
+    if (root.nodeType !== Node.ELEMENT_NODE) return nodes;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode(n) {
+        return isTranslatableTextNode(n) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
       },
     });
-    const nodes = [];
     let n;
     while ((n = walker.nextNode())) nodes.push(n);
     return nodes;
   }
 
+  function collectChineseTextNodes() {
+    return collectChineseTextNodesFrom(document.body);
+  }
+
   async function togglePageTranslate() {
     if (pageTranslated) {
-      REPLACED.forEach(({ node, original }) => { node.nodeValue = original; });
+      stopObserver();
+      REPLACED.forEach(({ node, original }) => { if (node) node.nodeValue = original; });
       REPLACED.length = 0;
       pageTranslated = false;
       return;
@@ -214,23 +235,48 @@
     }
     if (cur.length) batches.push(cur);
 
+    await translateNodes(nodes);
+    startObserver();
+  }
+
+  async function translateNodes(nodes) {
+    if (!nodes.length) return;
+    const SEP = "\n¶¶¶\n";
+    const MAX_CHARS = 1800;
+    const CONCURRENCY = 8;
+
+    const batches = [];
+    let cur = [], curLen = 0;
+    for (const n of nodes) {
+      const len = (n.nodeValue || "").length + SEP.length;
+      if (cur.length && curLen + len > MAX_CHARS) {
+        batches.push(cur); cur = []; curLen = 0;
+      }
+      cur.push(n); curLen += len;
+    }
+    if (cur.length) batches.push(cur);
+
     async function runBatch(slice) {
       const joined = slice.map((n) => n.nodeValue.trim()).join(SEP);
       const translated = await requestTranslate(joined);
       const parts = translated.split(/\n?¶¶¶\n?/);
+      // 옵저버가 우리 변경을 다시 잡지 않도록 일시 정지
+      if (observer) observer.disconnect();
       slice.forEach((node, idx) => {
         const t = parts[idx];
         if (t == null) return;
+        if (!node.parentNode) return;
         const original = node.nodeValue;
         const m = original.match(/^(\s*)([\s\S]*?)(\s*)$/);
         const lead = m ? m[1] : "";
         const trail = m ? m[3] : "";
         REPLACED.push({ node, original });
+        TRANSLATED_NODES.add(node);
         node.nodeValue = lead + t + trail;
       });
+      if (observer && pageTranslated) attachObserver();
     }
 
-    // 동시성 제한 워커 풀
     let idx = 0;
     await Promise.all(
       Array.from({ length: CONCURRENCY }, async () => {
@@ -240,5 +286,45 @@
         }
       })
     );
+  }
+
+  function attachObserver() {
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+  }
+
+  function startObserver() {
+    if (observer) return;
+    observer = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        if (m.type === "childList") {
+          m.addedNodes.forEach((n) => {
+            collectChineseTextNodesFrom(n).forEach((tn) => pendingNodes.add(tn));
+          });
+        } else if (m.type === "characterData") {
+          if (isTranslatableTextNode(m.target)) pendingNodes.add(m.target);
+        }
+      }
+      if (pendingNodes.size && !flushTimer) {
+        flushTimer = setTimeout(flushPending, 250);
+      }
+    });
+    attachObserver();
+  }
+
+  function stopObserver() {
+    if (observer) { observer.disconnect(); observer = null; }
+    if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+    pendingNodes.clear();
+  }
+
+  async function flushPending() {
+    flushTimer = null;
+    const nodes = Array.from(pendingNodes).filter(isTranslatableTextNode);
+    pendingNodes.clear();
+    if (nodes.length) await translateNodes(nodes);
   }
 })();
