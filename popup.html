@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body {
+        font-family: -apple-system, "Segoe UI", "Noto Sans KR", sans-serif;
+        width: 260px;
+        padding: 12px;
+        margin: 0;
+      }
+      h1 { font-size: 14px; margin: 0 0 10px; }
+      label { display: flex; align-items: center; gap: 8px; font-size: 13px; margin: 8px 0; }
+      button {
+        width: 100%; padding: 8px; margin-top: 6px; border: 0; border-radius: 6px;
+        background: #2563eb; color: #fff; font-size: 13px; cursor: pointer;
+      }
+      button.secondary { background: #6b7280; }
+      .hint { font-size: 11px; color: #6b7280; margin-top: 10px; line-height: 1.5; }
+    </style>
+  </head>
+  <body>
+    <h1>중국어→한국어 번역기</h1>
+    <button id="translatePage">전체 페이지 번역 토글</button>
+    <button id="translateSel" class="secondary">선택 영역 번역</button>
+    <button id="openComposer">✍️ 입력 번역 (한→중)</button>
+    <hr style="margin:10px 0;border:0;border-top:1px solid #e5e7eb" />
+    <textarea id="quickSrc" placeholder="여기에 한국어 입력 → 중국어로 번역"
+      style="width:100%;box-sizing:border-box;height:60px;font-size:13px;
+             padding:6px;border:1px solid #d1d5db;border-radius:5px;
+             font-family:inherit;resize:vertical"></textarea>
+    <div id="quickOut" style="margin-top:6px;min-height:40px;font-size:13px;
+         color:#2563eb;white-space:pre-wrap;padding:6px;background:#f9fafb;
+         border-radius:5px"></div>
+    <div class="hint">
+      • 텍스트 드래그 → 자동 팝업<br />
+      • 단축키: Alt+Shift+T (전체)<br />
+      • 우클릭 메뉴에서도 번역
+    </div>
+    <script src="popup.js"></script>
+  </body>
+</html>

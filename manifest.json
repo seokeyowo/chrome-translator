@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "중국어→한국어 실시간 번역기",
+  "version": "1.0.0",
+  "description": "웹페이지의 중국어 텍스트를 선택/호버하면 한국어로 번역해 보여줍니다.",
+  "permissions": ["storage", "contextMenus", "activeTab", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js" },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "중국어→한국어 번역기"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "commands": {
+    "translate-page": {
+      "suggested_key": { "default": "Alt+Shift+T" },
+      "description": "현재 페이지 전체 번역 토글"
+    }
+  }
+}
