@@ -199,9 +199,22 @@
     pageTranslated = true;
     const nodes = collectChineseTextNodes();
     const SEP = "\n¶¶¶\n";
-    const BATCH = 30;
-    for (let i = 0; i < nodes.length; i += BATCH) {
-      const slice = nodes.slice(i, i + BATCH);
+    const MAX_CHARS = 1800; // 한 요청당 대략 글자 수 (URL 길이 안전선)
+    const CONCURRENCY = 8;
+
+    // 글자수 기반으로 배치 묶기
+    const batches = [];
+    let cur = [], curLen = 0;
+    for (const n of nodes) {
+      const len = (n.nodeValue || "").length + SEP.length;
+      if (cur.length && curLen + len > MAX_CHARS) {
+        batches.push(cur); cur = []; curLen = 0;
+      }
+      cur.push(n); curLen += len;
+    }
+    if (cur.length) batches.push(cur);
+
+    async function runBatch(slice) {
       const joined = slice.map((n) => n.nodeValue.trim()).join(SEP);
       const translated = await requestTranslate(joined);
       const parts = translated.split(/\n?¶¶¶\n?/);
@@ -209,7 +222,6 @@
         const t = parts[idx];
         if (t == null) return;
         const original = node.nodeValue;
-        // 앞뒤 공백 유지하고 가운데 내용만 번역으로 교체
         const m = original.match(/^(\s*)([\s\S]*?)(\s*)$/);
         const lead = m ? m[1] : "";
         const trail = m ? m[3] : "";
@@ -217,5 +229,16 @@
         node.nodeValue = lead + t + trail;
       });
     }
+
+    // 동시성 제한 워커 풀
+    let idx = 0;
+    await Promise.all(
+      Array.from({ length: CONCURRENCY }, async () => {
+        while (idx < batches.length) {
+          const myIdx = idx++;
+          await runBatch(batches[myIdx]);
+        }
+      })
+    );
   }
 })();
