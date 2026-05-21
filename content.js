@@ -170,7 +170,7 @@
   const SKIP_TAGS = new Set([
     "SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "INPUT", "CODE", "PRE", "IFRAME",
   ]);
-  const INSERTED = [];
+  const REPLACED = []; // { node, original }
 
   function collectChineseTextNodes() {
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
@@ -179,7 +179,7 @@
         if (!/[㐀-鿿]/.test(node.nodeValue)) return NodeFilter.FILTER_REJECT;
         const p = node.parentElement;
         if (!p || SKIP_TAGS.has(p.tagName)) return NodeFilter.FILTER_REJECT;
-        if (p.closest(".ctk-popup, .ctk-inline")) return NodeFilter.FILTER_REJECT;
+        if (p.closest(".ctk-popup, .ctk-composer")) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       },
     });
@@ -191,14 +191,13 @@
 
   async function togglePageTranslate() {
     if (pageTranslated) {
-      INSERTED.forEach((el) => el.remove());
-      INSERTED.length = 0;
+      REPLACED.forEach(({ node, original }) => { node.nodeValue = original; });
+      REPLACED.length = 0;
       pageTranslated = false;
       return;
     }
     pageTranslated = true;
     const nodes = collectChineseTextNodes();
-    // 배치로 묶어 번역 (구분자로 합쳐 1회 호출)
     const SEP = "\n¶¶¶\n";
     const BATCH = 30;
     for (let i = 0; i < nodes.length; i += BATCH) {
@@ -207,13 +206,15 @@
       const translated = await requestTranslate(joined);
       const parts = translated.split(/\n?¶¶¶\n?/);
       slice.forEach((node, idx) => {
-        const span = document.createElement("span");
-        span.className = "ctk-inline";
-        span.textContent = parts[idx] || "";
-        if (node.parentNode) {
-          node.parentNode.insertBefore(span, node.nextSibling);
-          INSERTED.push(span);
-        }
+        const t = parts[idx];
+        if (t == null) return;
+        const original = node.nodeValue;
+        // 앞뒤 공백 유지하고 가운데 내용만 번역으로 교체
+        const m = original.match(/^(\s*)([\s\S]*?)(\s*)$/);
+        const lead = m ? m[1] : "";
+        const trail = m ? m[3] : "";
+        REPLACED.push({ node, original });
+        node.nodeValue = lead + t + trail;
       });
     }
   }
